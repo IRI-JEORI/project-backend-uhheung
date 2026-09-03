@@ -1,1 +1,3 @@
-# project-backend-uhheung
+# NUNNUN-BE
+
+NUNNUN 백엔드 프로젝트입니다.
