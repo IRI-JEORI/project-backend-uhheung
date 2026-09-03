@@ -2,8 +2,10 @@ package com.nunnun.wake.service;
 
 import com.nunnun.global.exception.BusinessException;
 import com.nunnun.global.exception.ErrorCode;
+import com.nunnun.notification.entity.Notification;
 import com.nunnun.notification.service.DndWindowService;
 import com.nunnun.notification.service.NotificationService;
+import com.nunnun.notification.service.WakeRequestImmediateDispatcher;
 import com.nunnun.user.entity.User;
 import com.nunnun.user.repository.UserRepository;
 import com.nunnun.user.service.UserWriteGuard;
@@ -45,6 +47,7 @@ public class WakeRequestService {
     private final DailyPoseService dailyPoseService;
     private final WakeEligibilityPolicy wakeEligibilityPolicy;
     private final WakeTargetSnapshotResolver wakeTargetSnapshotResolver;
+    private final WakeRequestImmediateDispatcher wakeRequestImmediateDispatcher;
 
     public WakeRequestService(
             WakeGroupRepository wakeGroupRepository,
@@ -57,7 +60,8 @@ public class WakeRequestService {
             UserWriteGuard userWriteGuard,
             DailyPoseService dailyPoseService,
             WakeEligibilityPolicy wakeEligibilityPolicy,
-            WakeTargetSnapshotResolver wakeTargetSnapshotResolver
+            WakeTargetSnapshotResolver wakeTargetSnapshotResolver,
+            WakeRequestImmediateDispatcher wakeRequestImmediateDispatcher
     ) {
         this.wakeGroupRepository = wakeGroupRepository;
         this.wakeGroupMemberRepository = wakeGroupMemberRepository;
@@ -70,6 +74,7 @@ public class WakeRequestService {
         this.dailyPoseService = dailyPoseService;
         this.wakeEligibilityPolicy = wakeEligibilityPolicy;
         this.wakeTargetSnapshotResolver = wakeTargetSnapshotResolver;
+        this.wakeRequestImmediateDispatcher = wakeRequestImmediateDispatcher;
     }
 
     @Transactional
@@ -106,7 +111,8 @@ public class WakeRequestService {
         WakeRequest request = wakeRequestRepository.save(
                 WakeRequest.send(group, sender, receiver, now, targetWakeAt)
         );
-        notificationService.createWakeRequest(request);
+        Notification notification = notificationService.createWakeRequest(request);
+        wakeRequestImmediateDispatcher.dispatchAfterCommit(notification.getId(), receiver.getId());
         return new CreateWakeRequestResponse(
                 request.getId(),
                 request.getStatus(),

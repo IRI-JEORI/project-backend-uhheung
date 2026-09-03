@@ -45,6 +45,7 @@ import com.nunnun.wake.repository.WakeProofRepository;
 import com.nunnun.wake.repository.WakeProofShareRepository;
 import com.nunnun.wake.repository.WakeRequestRepository;
 import com.nunnun.wake.service.WakeProofCleanupService;
+import com.nunnun.notification.service.WakeRequestImmediateDispatcher;
 import com.nunnun.wake.storage.WakeProofStorage;
 import com.nunnun.wake.storage.WakeProofStorageException;
 import java.time.Clock;
@@ -68,6 +69,7 @@ import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -101,6 +103,7 @@ class WakeRequestControllerTest {
     @Autowired private WeeklyWakeTargetRepository weeklyWakeTargetRepository;
     @MockBean private WakeProofStorage wakeProofStorage;
     @MockBean private PoseComparisonClient poseComparisonClient;
+    @MockitoBean private WakeRequestImmediateDispatcher wakeRequestImmediateDispatcher;
     private Pose activePose;
 
     @BeforeEach
@@ -145,6 +148,8 @@ class WakeRequestControllerTest {
         assertThat(notification.getType()).isEqualTo(NotificationType.WAKE_REQUEST);
         assertThat(notification.getUser().getId()).isEqualTo(receiver.getId());
         assertThat(notification.getReferenceId()).isEqualTo(request.getId());
+        verify(wakeRequestImmediateDispatcher)
+                .dispatchAfterCommit(notification.getId(), receiver.getId());
     }
 
     @Test
