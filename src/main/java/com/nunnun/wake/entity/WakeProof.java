@@ -79,7 +79,7 @@ public class WakeProof extends BaseTimeEntity {
                 PoseMatchResult.SUCCESS,
                 verifiedAt,
                 verifiedAt,
-                verifiedAt.plusHours(8)
+                verifiedAt.plusHours(12)
         );
     }
 
@@ -87,7 +87,7 @@ public class WakeProof extends BaseTimeEntity {
                                    PoseMatchResult result, LocalDateTime submittedAt) {
         LocalDateTime verifiedAt = result == PoseMatchResult.SUCCESS ? submittedAt : null;
         return new WakeProof(wakeRequest, imageObjectKey, (short) score, result, submittedAt,
-                verifiedAt, verifiedAt == null ? null : verifiedAt.plusHours(8));
+                verifiedAt, verifiedAt == null ? null : verifiedAt.plusHours(12));
     }
 
     public void updateResult(String imageObjectKey, int score, PoseMatchResult result, LocalDateTime submittedAt) {
@@ -96,7 +96,7 @@ public class WakeProof extends BaseTimeEntity {
         this.poseMatchResult = Objects.requireNonNull(result);
         this.submittedAt = Objects.requireNonNull(submittedAt);
         this.verifiedAt = result == PoseMatchResult.SUCCESS ? submittedAt : null;
-        this.expiresAt = verifiedAt == null ? null : verifiedAt.plusHours(8);
+        this.expiresAt = verifiedAt == null ? null : verifiedAt.plusHours(12);
     }
 
     public void clearImageObjectKey() {
