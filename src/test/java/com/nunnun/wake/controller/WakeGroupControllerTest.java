@@ -308,7 +308,7 @@ class WakeGroupControllerTest {
                 .andExpect(jsonPath("$.data.members[1].actual_wake_time").value("08:50"))
                 .andExpect(jsonPath("$.data.members[1].proof_image_url").value("https://signed.example/card"))
                 .andExpect(jsonPath("$.data.members[1].proof_expires_at")
-                        .value("2026-08-17T16:50:00+09:00"))
+                        .value("2026-08-17T20:50:00+09:00"))
                 .andExpect(jsonPath("$.data.members[1].can_wake").value(false))
                 .andExpect(jsonPath("$.data.members[1].block_reason").value("COOLDOWN"))
                 .andExpect(jsonPath("$.data.members[1].wake_available_at")
@@ -335,7 +335,7 @@ class WakeGroupControllerTest {
                 .andExpect(jsonPath("$.data.members[1].actual_wake_time").value("08:50"))
                 .andExpect(jsonPath("$.data.members[1].proof_image_url").value(org.hamcrest.Matchers.nullValue()))
                 .andExpect(jsonPath("$.data.members[1].proof_expires_at")
-                        .value("2026-08-17T16:50:00+09:00"));
+                        .value("2026-08-17T20:50:00+09:00"));
     }
 
     @Test

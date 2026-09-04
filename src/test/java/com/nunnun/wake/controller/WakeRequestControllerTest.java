@@ -312,7 +312,7 @@ class WakeRequestControllerTest {
                 .andExpect(jsonPath("$.data.remaining_attempts").value(0))
                 .andExpect(jsonPath("$.data.verified_at").value("2026-08-12T23:40:00+09:00"))
                 .andExpect(jsonPath("$.data.cooldown_until").value("2026-08-13T00:10:00+09:00"))
-                .andExpect(jsonPath("$.data.proof_expires_at").value("2026-08-13T07:40:00+09:00"))
+                .andExpect(jsonPath("$.data.proof_expires_at").value("2026-08-13T11:40:00+09:00"))
                 .andExpect(jsonPath("$.data.length()").value(10));
 
         WakeProof proof = wakeProofRepository.findAll().getFirst();
@@ -600,7 +600,7 @@ class WakeRequestControllerTest {
         User sender = saveUser("sender@example.com");
         User receiver = saveUser("receiver@example.com");
         WakeRequest request = createRequest(sender, receiver);
-        WakeProof expired = wakeProofRepository.saveAndFlush(WakeProof.verify(request, "wake-proofs/expired.jpg", NOW.minusHours(8)));
+        WakeProof expired = wakeProofRepository.saveAndFlush(WakeProof.verify(request, "wake-proofs/expired.jpg", NOW.minusHours(12)));
         request.verify();
         wakeRequestRepository.saveAndFlush(request);
 
@@ -610,12 +610,12 @@ class WakeRequestControllerTest {
         assertThat(retained.getImageObjectKey()).isNull();
         assertThat(retained.getPoseMatchScore()).isEqualTo((short) 100);
         assertThat(retained.getPoseMatchResult()).isEqualTo(PoseMatchResult.SUCCESS);
-        assertThat(retained.getSubmittedAt()).isEqualTo(NOW.minusHours(8));
-        assertThat(retained.getVerifiedAt()).isEqualTo(NOW.minusHours(8));
+        assertThat(retained.getSubmittedAt()).isEqualTo(NOW.minusHours(12));
+        assertThat(retained.getVerifiedAt()).isEqualTo(NOW.minusHours(12));
         assertThat(retained.getExpiresAt()).isEqualTo(NOW);
         assertThat(wakeRequestRepository.findById(request.getId()).orElseThrow().getStatus()).isEqualTo(WakeRequestStatus.VERIFIED);
         assertThat(wakeRequestRepository.existsRecentVerifiedProofByReceiverId(
-                receiver.getId(), NOW.minusHours(9))).isTrue();
+                receiver.getId(), NOW.minusHours(13))).isTrue();
     }
 
     @Test
@@ -623,12 +623,14 @@ class WakeRequestControllerTest {
         User firstSender = saveUser("expiry-first-sender@example.com");
         User firstReceiver = saveUser("expiry-first-receiver@example.com");
         WakeProof failedDeletion = wakeProofRepository.saveAndFlush(WakeProof.verify(
-                createRequest(firstSender, firstReceiver), "wake-proofs/fail-delete.jpg", NOW.minusHours(9)));
+        createRequest(firstSender, firstReceiver),
+        "wake-proofs/fail-delete.jpg",
+        NOW.minusHours(13)));
 
         User secondSender = saveUser("expiry-second-sender@example.com");
         User secondReceiver = saveUser("expiry-second-receiver@example.com");
         WakeProof successfulDeletion = wakeProofRepository.saveAndFlush(WakeProof.verify(
-                createRequest(secondSender, secondReceiver), "wake-proofs/delete.jpg", NOW.minusHours(8)));
+                createRequest(secondSender, secondReceiver), "wake-proofs/delete.jpg", NOW.minusHours(12)));
 
         User futureSender = saveUser("expiry-future-sender@example.com");
         User futureReceiver = saveUser("expiry-future-receiver@example.com");
