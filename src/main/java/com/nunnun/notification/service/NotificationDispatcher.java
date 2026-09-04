@@ -61,4 +61,13 @@ public class NotificationDispatcher {
             );
         }
     }
+
+    public void dispatchImmediately(Long notificationId, Long userId) {
+        List<String> tokens = devices
+                .findAllByUserIdInAndPlatform(Set.of(userId), DevicePlatform.ANDROID)
+                .stream()
+                .map(UserDevice::getFcmToken)
+                .toList();
+        dispatchExecutor.dispatch(notificationId, tokens, LocalDateTime.now(clock));
+    }
 }

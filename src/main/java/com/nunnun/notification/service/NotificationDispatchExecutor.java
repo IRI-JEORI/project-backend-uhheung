@@ -13,6 +13,7 @@ import com.nunnun.sleep.repository.SleepSessionRepository;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -41,7 +42,7 @@ public class NotificationDispatchExecutor {
      * The row lock is intentionally held across the FCM call. With no PROCESSING state in the approved schema,
      * this is the only way to prevent two application instances from sending the same PENDING row.
      */
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void dispatch(Long notificationId, List<String> tokens, LocalDateTime now) {
         Notification notification = notifications.findByIdForUpdate(notificationId).orElse(null);
         if (notification == null || !notification.isPending()) {

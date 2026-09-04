@@ -161,6 +161,21 @@ class NotificationDispatcherTest {
     }
 
     @Test
+    void immediatelyDispatchesOneNotificationWithoutWaitingForScheduledPolling() {
+        User user = user("immediate@example.com");
+        devices.saveAndFlush(UserDevice.create(user, "immediate-token", DevicePlatform.ANDROID));
+        Notification notification = notification(user, NotificationType.WAKE_REQUEST, NOW, 12L);
+        when(pushSender.send(any(PushMessage.class), anyList()))
+                .thenReturn(new PushSendResult(1, 0));
+
+        dispatcher.dispatchImmediately(notification.getId(), user.getId());
+
+        verify(pushSender).send(any(PushMessage.class), anyList());
+        assertThat(reload(notification).getStatus()).isEqualTo(NotificationStatus.SENT);
+        assertThat(reload(notification).getSentAt()).isEqualTo(NOW);
+    }
+
+    @Test
     void marksMissingDeviceAsFailedWithoutCallingPushSender() {
         User user = user("user@example.com");
 

@@ -133,6 +133,9 @@ class NotificationDomainIntegrationTest {
     @MockitoBean
     private PushSender pushSender;
 
+    @MockitoBean
+    private WakeRequestImmediateDispatcher wakeRequestImmediateDispatcher;
+
     @BeforeEach
     @AfterEach
     void clean() {
