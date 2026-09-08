@@ -2,6 +2,9 @@ package com.nunnun.notification.push;
 
 import com.google.firebase.messaging.BatchResponse;
 import com.google.firebase.messaging.AndroidConfig;
+import com.google.firebase.messaging.ApnsConfig;
+import com.google.firebase.messaging.Aps;
+import com.google.firebase.messaging.ApsAlert;
 import com.google.firebase.messaging.FirebaseMessaging;
 import com.google.firebase.messaging.FirebaseMessagingException;
 import com.google.firebase.messaging.MulticastMessage;
@@ -57,6 +60,17 @@ public class FirebasePushSender implements PushSender {
             builder.putData("body", message.body());
             builder.setAndroidConfig(AndroidConfig.builder()
                     .setPriority(AndroidConfig.Priority.HIGH)
+                    .build());
+            builder.setApnsConfig(ApnsConfig.builder()
+                    .putHeader("apns-push-type", "alert")
+                    .putHeader("apns-priority", "10")
+                    .setAps(Aps.builder()
+                            .setAlert(ApsAlert.builder()
+                                    .setTitle(message.title())
+                                    .setBody(message.body())
+                                    .build())
+                            .setSound("default")
+                            .build())
                     .build());
         } else {
             builder.setNotification(com.google.firebase.messaging.Notification.builder()

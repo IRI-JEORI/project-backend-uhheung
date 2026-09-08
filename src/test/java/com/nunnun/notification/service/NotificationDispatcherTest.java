@@ -176,6 +176,39 @@ class NotificationDispatcherTest {
     }
 
     @Test
+    void immediatelyDispatchesWakeRequestToIosDevice() {
+        User user = user("ios-immediate@example.com");
+        devices.saveAndFlush(UserDevice.create(user, "ios-token", DevicePlatform.IOS));
+        Notification notification = notification(user, NotificationType.WAKE_REQUEST, NOW, 13L);
+        when(pushSender.send(any(PushMessage.class), anyList()))
+                .thenReturn(new PushSendResult(1, 0));
+
+        dispatcher.dispatchImmediately(notification.getId(), user.getId());
+
+        ArgumentCaptor<List<String>> tokens = ArgumentCaptor.captor();
+        verify(pushSender).send(any(PushMessage.class), tokens.capture());
+        assertThat(tokens.getValue()).containsExactly("ios-token");
+        assertThat(reload(notification).getStatus()).isEqualTo(NotificationStatus.SENT);
+    }
+
+    @Test
+    void dispatchesScheduledNotificationToAndroidAndIosDevices() {
+        User user = user("mixed-devices@example.com");
+        devices.saveAndFlush(UserDevice.create(user, "android-token", DevicePlatform.ANDROID));
+        devices.saveAndFlush(UserDevice.create(user, "ios-token", DevicePlatform.IOS));
+        Notification notification = notification(user, NotificationType.ROOMMATE_SLEEPING, NOW, 14L);
+        when(pushSender.send(any(PushMessage.class), anyList()))
+                .thenReturn(new PushSendResult(2, 0));
+
+        dispatcher.dispatchDueNotifications();
+
+        ArgumentCaptor<List<String>> tokens = ArgumentCaptor.captor();
+        verify(pushSender).send(any(PushMessage.class), tokens.capture());
+        assertThat(tokens.getValue()).containsExactlyInAnyOrder("android-token", "ios-token");
+        assertThat(reload(notification).getStatus()).isEqualTo(NotificationStatus.SENT);
+    }
+
+    @Test
     void marksMissingDeviceAsFailedWithoutCallingPushSender() {
         User user = user("user@example.com");
 

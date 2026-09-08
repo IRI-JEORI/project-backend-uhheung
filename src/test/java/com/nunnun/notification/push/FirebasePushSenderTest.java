@@ -7,6 +7,8 @@ import static org.mockito.Mockito.when;
 
 import com.google.firebase.messaging.BatchResponse;
 import com.google.firebase.messaging.AndroidConfig;
+import com.google.firebase.messaging.ApnsConfig;
+import com.google.firebase.messaging.ApsAlert;
 import com.google.firebase.messaging.FirebaseMessaging;
 import com.google.firebase.messaging.FirebaseMessagingException;
 import com.google.firebase.messaging.MulticastMessage;
@@ -105,6 +107,15 @@ class FirebasePushSenderTest {
 
         assertThat(androidPriorityFor(wakeRequest)).isEqualTo("high");
         assertThat(notificationFor(wakeRequest)).isNull();
+        assertThat(apnsHeadersFor(wakeRequest)).containsExactlyInAnyOrderEntriesOf(Map.of(
+                "apns-push-type", "alert",
+                "apns-priority", "10"
+        ));
+        Map<String, Object> aps = apsFor(wakeRequest);
+        assertThat(aps).containsEntry("sound", "default");
+        ApsAlert alert = (ApsAlert) aps.get("alert");
+        assertThat(alertField(alert, "title")).isEqualTo("깨우기 요청");
+        assertThat(alertField(alert, "body")).isEqualTo("친구가 깨우고 있어요.");
 
         PushMessage bedtimeReminder = new PushMessage(
                 "취침 시간이 다가와요",
@@ -115,6 +126,7 @@ class FirebasePushSenderTest {
 
         assertThat(androidPriorityFor(bedtimeReminder)).isNull();
         assertThat(notificationFor(bedtimeReminder)).isNotNull();
+        assertThat(apnsConfigFor(bedtimeReminder)).isNull();
     }
 
     @SuppressWarnings("unchecked")
@@ -147,6 +159,40 @@ class FirebasePushSenderTest {
         Field notification = MulticastMessage.class.getDeclaredField("notification");
         notification.setAccessible(true);
         return (Notification) notification.get(message);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, String> apnsHeadersFor(PushMessage pushMessage) throws Exception {
+        ApnsConfig config = apnsConfigFor(pushMessage);
+        Field headers = ApnsConfig.class.getDeclaredField("headers");
+        headers.setAccessible(true);
+        return Map.copyOf((Map<String, String>) headers.get(config));
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> apnsPayloadFor(PushMessage pushMessage) throws Exception {
+        ApnsConfig config = apnsConfigFor(pushMessage);
+        Field payload = ApnsConfig.class.getDeclaredField("payload");
+        payload.setAccessible(true);
+        return Map.copyOf((Map<String, Object>) payload.get(config));
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> apsFor(PushMessage pushMessage) throws Exception {
+        return Map.copyOf((Map<String, Object>) apnsPayloadFor(pushMessage).get("aps"));
+    }
+
+    private String alertField(ApsAlert alert, String fieldName) throws Exception {
+        Field field = ApsAlert.class.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        return (String) field.get(alert);
+    }
+
+    private ApnsConfig apnsConfigFor(PushMessage pushMessage) throws Exception {
+        MulticastMessage message = messageFor(pushMessage);
+        Field apnsConfig = MulticastMessage.class.getDeclaredField("apnsConfig");
+        apnsConfig.setAccessible(true);
+        return (ApnsConfig) apnsConfig.get(message);
     }
 
     private MulticastMessage messageFor(PushMessage pushMessage) throws Exception {
