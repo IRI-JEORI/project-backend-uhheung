@@ -91,11 +91,12 @@ class WakeRequestConcurrencyTest {
         assertThat(successes).hasValue(3);
         assertThat(rejections).hasValue(0);
         assertThat(requests.count()).isEqualTo(3);
-        assertThat(dailyPoses.count()).isEqualTo(1);
+        assertThat(dailyPoses.count()).isZero();
+        assertThat(requests.findAll()).allSatisfy(request -> assertThat(request.getPose()).isNotNull());
     }
 
     @Test
-    void concurrentSelfVerifyCreatesEveryRequestAndOneDailyPose() throws Exception {
+    void concurrentSelfVerifyCreatesEveryRequestWithAssignedPose() throws Exception {
         User user = user("self-race@example.com");
         WakeGroup group = groups.saveAndFlush(WakeGroup.create("Self Race", "SELFR1", user));
         members.saveAndFlush(WakeGroupMember.join(group, user, (short) 1));
@@ -124,7 +125,8 @@ class WakeRequestConcurrencyTest {
 
         assertThat(successes).hasValue(2);
         assertThat(requests.count()).isEqualTo(2);
-        assertThat(dailyPoses.count()).isEqualTo(1);
+        assertThat(dailyPoses.count()).isZero();
+        assertThat(requests.findAll()).allSatisfy(request -> assertThat(request.getPose()).isNotNull());
         assertThat(notifications.count()).isZero();
     }
 

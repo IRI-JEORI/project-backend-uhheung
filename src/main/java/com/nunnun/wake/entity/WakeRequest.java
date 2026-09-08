@@ -41,6 +41,10 @@ public class WakeRequest {
     @JoinColumn(name = "receiver_id", nullable = false)
     private User receiver;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "pose_id")
+    private Pose pose;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private WakeRequestStatus status;
@@ -68,12 +72,14 @@ public class WakeRequest {
             WakeGroup wakeGroup,
             User sender,
             User receiver,
+            Pose pose,
             LocalDateTime requestedAt,
             LocalDateTime targetWakeAt
     ) {
         this.wakeGroup = Objects.requireNonNull(wakeGroup);
         this.sender = Objects.requireNonNull(sender);
         this.receiver = Objects.requireNonNull(receiver);
+        this.pose = pose;
         this.status = WakeRequestStatus.SENT;
         this.attemptCount = (short) 0;
         this.requestedAt = Objects.requireNonNull(requestedAt);
@@ -81,7 +87,7 @@ public class WakeRequest {
     }
 
     public static WakeRequest send(WakeGroup wakeGroup, User sender, User receiver, LocalDateTime requestedAt) {
-        return new WakeRequest(wakeGroup, sender, receiver, requestedAt, null);
+        return new WakeRequest(wakeGroup, sender, receiver, null, requestedAt, null);
     }
 
     public static WakeRequest send(
@@ -91,7 +97,18 @@ public class WakeRequest {
             LocalDateTime requestedAt,
             LocalDateTime targetWakeAt
     ) {
-        return new WakeRequest(wakeGroup, sender, receiver, requestedAt, targetWakeAt);
+        return new WakeRequest(wakeGroup, sender, receiver, null, requestedAt, targetWakeAt);
+    }
+
+    public static WakeRequest send(
+            WakeGroup wakeGroup,
+            User sender,
+            User receiver,
+            Pose pose,
+            LocalDateTime requestedAt,
+            LocalDateTime targetWakeAt
+    ) {
+        return new WakeRequest(wakeGroup, sender, receiver, Objects.requireNonNull(pose), requestedAt, targetWakeAt);
     }
 
     public boolean canBeVerified() {
@@ -136,6 +153,7 @@ public class WakeRequest {
     public WakeGroup getWakeGroup() { return wakeGroup; }
     public User getSender() { return sender; }
     public User getReceiver() { return receiver; }
+    public Pose getPose() { return pose; }
     public WakeRequestStatus getStatus() { return status; }
     public Short getAttemptCount() { return attemptCount; }
     public LocalDateTime getRequestedAt() { return requestedAt; }
