@@ -1,6 +1,5 @@
 package com.nunnun.notification.service;
 
-import com.nunnun.device.entity.DevicePlatform;
 import com.nunnun.device.entity.UserDevice;
 import com.nunnun.device.repository.DeviceRepository;
 import java.time.Clock;
@@ -46,7 +45,7 @@ public class NotificationDispatcher {
                 .map(NotificationDispatchTarget::userId)
                 .collect(Collectors.toSet());
         Map<Long, List<String>> tokensByUserId = devices
-                .findAllByUserIdInAndPlatform(userIds, DevicePlatform.ANDROID)
+                .findAllByUserIdIn(userIds)
                 .stream()
                 .collect(Collectors.groupingBy(
                         device -> device.getUser().getId(),
@@ -64,7 +63,7 @@ public class NotificationDispatcher {
 
     public void dispatchImmediately(Long notificationId, Long userId) {
         List<String> tokens = devices
-                .findAllByUserIdInAndPlatform(Set.of(userId), DevicePlatform.ANDROID)
+                .findAllByUserIdIn(Set.of(userId))
                 .stream()
                 .map(UserDevice::getFcmToken)
                 .toList();

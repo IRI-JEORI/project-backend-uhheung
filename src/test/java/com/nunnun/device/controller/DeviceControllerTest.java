@@ -74,17 +74,18 @@ class DeviceControllerTest {
     }
 
     @Test
-    void rejectsIosBecauseMvpSupportsAndroidOnly() throws Exception {
+    void registersIosAlongsideAndroid() throws Exception {
         User user = saveUser("nunnun@example.com");
-        mockMvc.perform(register(user, "token-A", "ANDROID"))
+        mockMvc.perform(register(user, "android-token", "ANDROID"))
                 .andExpect(status().isOk());
 
-        mockMvc.perform(register(user, "token-A", "IOS"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error.code").value("INVALID_REQUEST"));
+        mockMvc.perform(register(user, "ios-token", "IOS"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.registered").value(true));
 
-        assertThat(deviceRepository.findByFcmToken("token-A").orElseThrow().getPlatform())
-                .isEqualTo(DevicePlatform.ANDROID);
+        assertThat(deviceRepository.findByFcmToken("ios-token").orElseThrow().getPlatform())
+                .isEqualTo(DevicePlatform.IOS);
+        assertThat(deviceRepository.count()).isEqualTo(2);
     }
 
     @Test
