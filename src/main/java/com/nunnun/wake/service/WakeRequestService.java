@@ -14,12 +14,14 @@ import com.nunnun.wake.dto.CreateSelfVerifyResponse;
 import com.nunnun.wake.dto.WakeRequestDetailResponse;
 import com.nunnun.wake.dto.WakeBlockReason;
 import com.nunnun.wake.entity.DailyPose;
+import com.nunnun.wake.entity.Pose;
 import com.nunnun.wake.entity.WakeGroup;
 import com.nunnun.wake.entity.WakeRequest;
 import com.nunnun.wake.entity.WakeRequestStatus;
 import com.nunnun.wake.repository.WakeGroupMemberRepository;
 import com.nunnun.wake.repository.WakeGroupRepository;
 import com.nunnun.wake.repository.WakeRequestRepository;
+import com.nunnun.wake.repository.PoseRepository;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZonedDateTime;
@@ -27,6 +29,7 @@ import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ThreadLocalRandom;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,6 +48,7 @@ public class WakeRequestService {
     private final DndWindowService dndWindowService;
     private final UserWriteGuard userWriteGuard;
     private final DailyPoseService dailyPoseService;
+    private final PoseRepository poseRepository;
     private final WakeEligibilityPolicy wakeEligibilityPolicy;
     private final WakeTargetSnapshotResolver wakeTargetSnapshotResolver;
     private final WakeRequestImmediateDispatcher wakeRequestImmediateDispatcher;
@@ -59,6 +63,7 @@ public class WakeRequestService {
             DndWindowService dndWindowService,
             UserWriteGuard userWriteGuard,
             DailyPoseService dailyPoseService,
+            PoseRepository poseRepository,
             WakeEligibilityPolicy wakeEligibilityPolicy,
             WakeTargetSnapshotResolver wakeTargetSnapshotResolver,
             WakeRequestImmediateDispatcher wakeRequestImmediateDispatcher
@@ -72,6 +77,7 @@ public class WakeRequestService {
         this.dndWindowService = dndWindowService;
         this.userWriteGuard = userWriteGuard;
         this.dailyPoseService = dailyPoseService;
+        this.poseRepository = poseRepository;
         this.wakeEligibilityPolicy = wakeEligibilityPolicy;
         this.wakeTargetSnapshotResolver = wakeTargetSnapshotResolver;
         this.wakeRequestImmediateDispatcher = wakeRequestImmediateDispatcher;
@@ -106,10 +112,10 @@ public class WakeRequestService {
         if (eligibility.blockReason() == WakeBlockReason.COOLDOWN) {
             throw new BusinessException(ErrorCode.WAKE_COOLDOWN);
         }
-        dailyPoseService.getOrCreateDailyPose(groupId, now.toLocalDate());
+        Pose pose = selectPose(groupId, receiverId);
         LocalDateTime targetWakeAt = wakeTargetSnapshotResolver.resolve(receiverId, now);
         WakeRequest request = wakeRequestRepository.save(
-                WakeRequest.send(group, sender, receiver, now, targetWakeAt)
+                WakeRequest.send(group, sender, receiver, pose, now, targetWakeAt)
         );
         Notification notification = notificationService.createWakeRequest(request);
         wakeRequestImmediateDispatcher.dispatchAfterCommit(notification.getId(), receiver.getId());
@@ -129,12 +135,12 @@ public class WakeRequestService {
             throw new BusinessException(ErrorCode.WAKE_GROUP_ACCESS_DENIED);
         }
         LocalDateTime now = LocalDateTime.now(clock);
-        DailyPose dailyPose = dailyPoseService.getOrCreateDailyPose(group.getId(), now.toLocalDate());
+        Pose pose = selectPose(groupId, userId);
         LocalDateTime targetWakeAt = wakeTargetSnapshotResolver.resolve(userId, now);
         WakeRequest request = wakeRequestRepository.save(
-                WakeRequest.send(group, user, user, now, targetWakeAt)
+                WakeRequest.send(group, user, user, pose, now, targetWakeAt)
         );
-        return CreateSelfVerifyResponse.from(request, dailyPose);
+        return CreateSelfVerifyResponse.from(request, null);
     }
 
     @Transactional(readOnly = true)
@@ -144,10 +150,7 @@ public class WakeRequestService {
         if (!request.getSender().getId().equals(userId) && !request.getReceiver().getId().equals(userId)) {
             throw new BusinessException(ErrorCode.WAKE_REQUEST_ACCESS_DENIED);
         }
-        DailyPose dailyPose = dailyPoseService.getDailyPose(
-                request.getWakeGroup().getId(),
-                request.getRequestedAt().toLocalDate()
-        );
+        DailyPose dailyPose = findLegacyDailyPose(request);
         return WakeRequestDetailResponse.from(request, dailyPose);
     }
 
@@ -159,10 +162,7 @@ public class WakeRequestService {
                 .findFirst()
                 .map(request -> WakeRequestDetailResponse.from(
                         request,
-                        dailyPoseService.getDailyPose(
-                                request.getWakeGroup().getId(),
-                                request.getRequestedAt().toLocalDate()
-                        )
+                        findLegacyDailyPose(request)
                 ));
     }
 
@@ -188,5 +188,29 @@ public class WakeRequestService {
     private User findActiveUser(Long userId) {
         return userRepository.findByIdAndDeletedAtIsNull(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+    }
+
+    private Pose selectPose(Long groupId, Long receiverId) {
+        List<Pose> activePoses = poseRepository.findAllByActiveTrue();
+        if (activePoses.isEmpty()) {
+            throw new BusinessException(ErrorCode.ACTIVE_POSE_NOT_FOUND);
+        }
+        Optional<Long> previousPoseId = wakeRequestRepository
+                .findFirstByWakeGroupIdAndReceiverIdAndPoseIsNotNullOrderByRequestedAtDescIdDesc(groupId, receiverId)
+                .map(request -> request.getPose().getId());
+        List<Pose> candidates = activePoses.size() > 1 && previousPoseId.isPresent()
+                ? activePoses.stream().filter(pose -> !pose.getId().equals(previousPoseId.get())).toList()
+                : activePoses;
+        return candidates.get(ThreadLocalRandom.current().nextInt(candidates.size()));
+    }
+
+    private DailyPose findLegacyDailyPose(WakeRequest request) {
+        if (request.getPose() != null) {
+            return null;
+        }
+        return dailyPoseService.getDailyPose(
+                request.getWakeGroup().getId(),
+                request.getRequestedAt().toLocalDate()
+        );
     }
 }

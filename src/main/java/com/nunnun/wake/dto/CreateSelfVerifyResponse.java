@@ -17,7 +17,7 @@ public record CreateSelfVerifyResponse(
                 request.getId(),
                 request.getStatus(),
                 true,
-                WakeRequestPoseResponse.from(dailyPose)
+                WakeRequestPoseResponse.from(request, dailyPose)
         );
     }
 }

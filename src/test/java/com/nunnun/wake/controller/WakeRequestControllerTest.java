@@ -139,17 +139,110 @@ class WakeRequestControllerTest {
         WakeRequest request = wakeRequestRepository.findAll().getFirst();
         assertThat(request.getSender().getId()).isEqualTo(sender.getId());
         assertThat(request.getReceiver().getId()).isEqualTo(receiver.getId());
+        assertThat(request.getPose().getId()).isEqualTo(activePose.getId());
         assertThat(request.getStatus()).isEqualTo(WakeRequestStatus.SENT);
         assertThat(request.getAttemptCount()).isZero();
         assertThat(request.getTargetWakeAt()).isNull();
         assertThat(dailyPoseRepository.countByWakeGroupIdAndPoseDate(
-                group.getId(), NOW.toLocalDate())).isEqualTo(1);
+                group.getId(), NOW.toLocalDate())).isZero();
         Notification notification = notificationRepository.findAll().getFirst();
         assertThat(notification.getType()).isEqualTo(NotificationType.WAKE_REQUEST);
         assertThat(notification.getUser().getId()).isEqualTo(receiver.getId());
         assertThat(notification.getReferenceId()).isEqualTo(request.getId());
         verify(wakeRequestImmediateDispatcher)
                 .dispatchAfterCommit(notification.getId(), receiver.getId());
+    }
+
+    @Test
+    void keepsAssignedPoseStableAcrossRepeatedRequestReads() throws Exception {
+        User sender = saveUser("stable-pose-sender@example.com");
+        User receiver = saveUser("stable-pose-receiver@example.com");
+        WakeGroup group = createGroup(sender, receiver);
+
+        wake(sender, group.getId(), receiver.getId()).andExpect(status().isCreated());
+        Long requestId = wakeRequestRepository.findAll().getFirst().getId();
+        WakeRequest request = wakeRequestRepository.findDetailById(requestId).orElseThrow();
+
+        for (int read = 0; read < 2; read++) {
+            mockMvc.perform(get("/wake-requests/{id}", request.getId())
+                            .header("Authorization", bearer(receiver)))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.data.pose.code").value(request.getPose().getCode()))
+                    .andExpect(jsonPath("$.data.pose.description").value(request.getPose().getDescription()));
+        }
+        assertThat(wakeRequestRepository.findDetailById(request.getId()).orElseThrow().getPose().getId())
+                .isEqualTo(request.getPose().getId());
+    }
+
+    @Test
+    void assignsDifferentPoseForConsecutiveRequestsOfSameReceiver() throws Exception {
+        User sender = saveUser("alternating-pose-sender@example.com");
+        User receiver = saveUser("alternating-pose-receiver@example.com");
+        WakeGroup group = createGroup(sender, receiver);
+        poseRepository.saveAndFlush(Pose.create("TEST_POSE_2", "test/pose-2.png", "두 팔을 벌려주세요"));
+
+        wake(sender, group.getId(), receiver.getId()).andExpect(status().isCreated());
+        wake(sender, group.getId(), receiver.getId()).andExpect(status().isCreated());
+        wake(sender, group.getId(), receiver.getId()).andExpect(status().isCreated());
+
+        java.util.List<WakeRequest> requests = wakeRequestRepository.findAllByWakeGroupId(group.getId()).stream()
+                .sorted(java.util.Comparator.comparing(WakeRequest::getId))
+                .toList();
+        assertThat(requests).hasSize(3);
+        assertThat(requests.get(0).getPose().getId()).isNotEqualTo(requests.get(1).getPose().getId());
+        assertThat(requests.get(1).getPose().getId()).isNotEqualTo(requests.get(2).getPose().getId());
+        assertThat(dailyPoseRepository.count()).isZero();
+    }
+
+    @Test
+    void skipsNewestLegacyRequestWhenFindingPreviousAssignedPose() throws Exception {
+        User sender = saveUser("legacy-gap-sender@example.com");
+        User receiver = saveUser("legacy-gap-receiver@example.com");
+        WakeGroup group = createGroup(sender, receiver);
+        poseRepository.saveAndFlush(Pose.create("TEST_POSE_2", "test/pose-2.png", "두 팔을 벌려주세요"));
+        WakeRequest assigned = wakeRequestRepository.saveAndFlush(
+                WakeRequest.send(group, sender, receiver, activePose, NOW.minusMinutes(2), null)
+        );
+        wakeRequestRepository.saveAndFlush(WakeRequest.send(group, sender, receiver, NOW.minusMinutes(1)));
+
+        wake(sender, group.getId(), receiver.getId()).andExpect(status().isCreated());
+
+        WakeRequest created = wakeRequestRepository.findAllByWakeGroupId(group.getId()).stream()
+                .max(java.util.Comparator.comparing(WakeRequest::getId))
+                .orElseThrow();
+        assertThat(created.getPose().getId()).isNotEqualTo(assigned.getPose().getId());
+    }
+
+    @Test
+    void assignsOnlyActivePoseWhenThereIsOneCandidate() throws Exception {
+        User sender = saveUser("single-pose-sender@example.com");
+        User receiver = saveUser("single-pose-receiver@example.com");
+        WakeGroup group = createGroup(sender, receiver);
+
+        wake(sender, group.getId(), receiver.getId()).andExpect(status().isCreated());
+
+        WakeRequest request = wakeRequestRepository.findAll().getFirst();
+        assertThat(request.getPose().getId()).isEqualTo(activePose.getId());
+    }
+
+    @Test
+    void assignsPosesPerReceiverWithoutCreatingGroupDailyPose() throws Exception {
+        User sender = saveUser("per-receiver-sender@example.com");
+        User firstReceiver = saveUser("per-receiver-first@example.com");
+        User secondReceiver = saveUser("per-receiver-second@example.com");
+        WakeGroup group = wakeGroupRepository.saveAndFlush(WakeGroup.create("Wake", "PERR01", sender));
+        wakeGroupMemberRepository.saveAndFlush(WakeGroupMember.join(group, sender, (short) 1));
+        wakeGroupMemberRepository.saveAndFlush(WakeGroupMember.join(group, firstReceiver, (short) 2));
+        wakeGroupMemberRepository.saveAndFlush(WakeGroupMember.join(group, secondReceiver, (short) 3));
+        poseRepository.saveAndFlush(Pose.create("TEST_POSE_2", "test/pose-2.png", "두 팔을 벌려주세요"));
+
+        wake(sender, group.getId(), firstReceiver.getId()).andExpect(status().isCreated());
+        wake(sender, group.getId(), secondReceiver.getId()).andExpect(status().isCreated());
+
+        assertThat(wakeRequestRepository.findAllByWakeGroupId(group.getId()))
+                .hasSize(2)
+                .allSatisfy(request -> assertThat(request.getPose()).isNotNull());
+        assertThat(dailyPoseRepository.count()).isZero();
     }
 
     @Test
@@ -298,6 +391,11 @@ class WakeRequestControllerTest {
         mockMvc.perform(get("/wake-requests/{id}", request.getId()).header("Authorization", bearer(outsider)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error.code").value("WAKE_REQUEST_ACCESS_DENIED"));
+
+        uploadProof(receiver, request.getId(), image("legacy.png", "image/png", new byte[]{1}))
+                .andExpect(status().isCreated());
+        verify(poseComparisonClient)
+                .compare(anyString(), org.mockito.ArgumentMatchers.eq(activePose.getDescription()));
     }
 
     @Test
@@ -553,6 +651,8 @@ class WakeRequestControllerTest {
         assertThat(retried.getImageObjectKey()).isNotNull();
         assertThat(retried.getPoseMatchScore()).isEqualTo((short) 82);
         assertThat(wakeRequestRepository.findById(request.getId()).orElseThrow().getAttemptCount()).isEqualTo((short) 2);
+        verify(poseComparisonClient, org.mockito.Mockito.times(2))
+                .compare(anyString(), org.mockito.ArgumentMatchers.eq(activePose.getDescription()));
     }
 
     @Test
@@ -581,6 +681,7 @@ class WakeRequestControllerTest {
         User sender = saveUser("retry-fail-sender@example.com");
         User receiver = saveUser("retry-fail-receiver@example.com");
         WakeRequest request = createRequest(sender, receiver);
+        poseRepository.saveAndFlush(Pose.create("RETRY_POSE_2", "test/retry-pose-2.png", "두 팔을 벌려주세요"));
         when(poseComparisonClient.compare(anyString(), anyString())).thenReturn(40, 55);
 
         uploadProof(receiver, request.getId(), image("first.png", "image/png", new byte[]{1}))
@@ -598,6 +699,13 @@ class WakeRequestControllerTest {
         verify(wakeProofStorage, org.mockito.Mockito.never()).upload(anyString(), any());
         verify(poseComparisonClient, org.mockito.Mockito.never()).compare(anyString(), anyString());
         assertThat(wakeProofRepository.count()).isOne();
+
+        wake(sender, request.getWakeGroup().getId(), receiver.getId()).andExpect(status().isCreated());
+        WakeRequest nextRequest = wakeRequestRepository.findAllByWakeGroupId(request.getWakeGroup().getId()).stream()
+                .filter(candidate -> !candidate.getId().equals(request.getId()))
+                .findFirst()
+                .orElseThrow();
+        assertThat(nextRequest.getPose().getId()).isNotEqualTo(request.getPose().getId());
     }
 
     @Test
@@ -709,7 +817,7 @@ class WakeRequestControllerTest {
         wakeGroupMemberRepository.saveAndFlush(WakeGroupMember.join(group, second, (short) 2));
         wakeGroupMemberRepository.saveAndFlush(WakeGroupMember.join(group, receiver, (short) 3));
         WakeRequest existing = wakeRequestRepository.saveAndFlush(
-                WakeRequest.send(group, first, receiver, NOW.minusSeconds(1))
+                WakeRequest.send(group, first, receiver, activePose, NOW.minusSeconds(1), null)
         );
 
         wake(second, group.getId(), receiver.getId())
@@ -717,7 +825,7 @@ class WakeRequestControllerTest {
                 .andExpect(jsonPath("$.data.status").value("SENT"));
         assertThat(wakeRequestRepository.findAllByWakeGroupId(group.getId())).hasSize(2);
         assertThat(dailyPoseRepository.countByWakeGroupIdAndPoseDate(
-                group.getId(), NOW.toLocalDate())).isEqualTo(1);
+                group.getId(), NOW.toLocalDate())).isZero();
         WakeRequest created = wakeRequestRepository.findAllByWakeGroupId(group.getId()).stream()
                 .filter(request -> !request.getId().equals(existing.getId()))
                 .findFirst()
@@ -734,7 +842,7 @@ class WakeRequestControllerTest {
     }
 
     @Test
-    void reusesExistingDailyPoseForWakeRequest() throws Exception {
+    void assignsWakeRequestPoseWithoutChangingExistingDailyPose() throws Exception {
         User sender = saveUser("existing-pose-sender@example.com");
         User receiver = saveUser("existing-pose-receiver@example.com");
         WakeGroup group = createGroup(sender, receiver);
@@ -746,6 +854,8 @@ class WakeRequestControllerTest {
 
         assertThat(dailyPoseRepository.findAll()).singleElement()
                 .extracting(DailyPose::getId).isEqualTo(existing.getId());
+        assertThat(wakeRequestRepository.findAll()).singleElement()
+                .extracting(request -> request.getPose().getId()).isEqualTo(activePose.getId());
     }
 
     @Test
@@ -784,7 +894,8 @@ class WakeRequestControllerTest {
         assertThat(request.getReceiver().getId()).isEqualTo(user.getId());
         assertThat(request.getStatus()).isEqualTo(WakeRequestStatus.SENT);
         assertThat(request.getAttemptCount()).isZero();
-        assertThat(dailyPoseRepository.count()).isEqualTo(1);
+        assertThat(request.getPose().getId()).isEqualTo(activePose.getId());
+        assertThat(dailyPoseRepository.count()).isZero();
         assertThat(notificationRepository.count()).isZero();
     }
 
@@ -973,7 +1084,8 @@ class WakeRequestControllerTest {
         WakeRequest request = wakeRequestRepository.findAll().getFirst();
         assertThat(request.getWakeGroup().getId()).isEqualTo(groupB.getId());
         assertThat(dailyPoseRepository.findByWakeGroupIdAndPoseDate(groupB.getId(), NOW.toLocalDate()))
-                .isPresent();
+                .isEmpty();
+        assertThat(request.getPose().getId()).isEqualTo(activePose.getId());
         assertThat(dailyPoseRepository.findById(groupAPose.getId())).isPresent();
     }
 
@@ -1233,9 +1345,9 @@ class WakeRequestControllerTest {
 
     private WakeRequest createRequest(User sender, User receiver) {
         WakeGroup group = createGroup(sender, receiver);
-        WakeRequest request = wakeRequestRepository.saveAndFlush(WakeRequest.send(group, sender, receiver, NOW));
-        dailyPoseRepository.saveAndFlush(DailyPose.create(group, activePose, NOW.toLocalDate()));
-        return request;
+        return wakeRequestRepository.saveAndFlush(
+                WakeRequest.send(group, sender, receiver, activePose, NOW, null)
+        );
     }
 
     private WakeRequest verifiedRequest(
@@ -1258,7 +1370,8 @@ class WakeRequestControllerTest {
     }
 
     private WakeGroup createGroup(User first, User second) {
-        WakeGroup group = wakeGroupRepository.saveAndFlush(WakeGroup.create("Wake", "CODE" + first.getId(), first));
+        String inviteCode = String.format("C%05d", first.getId() % 100000);
+        WakeGroup group = wakeGroupRepository.saveAndFlush(WakeGroup.create("Wake", inviteCode, first));
         wakeGroupMemberRepository.saveAndFlush(WakeGroupMember.join(group, first, (short) 1));
         wakeGroupMemberRepository.saveAndFlush(WakeGroupMember.join(group, second, (short) 2));
         return group;

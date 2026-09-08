@@ -28,7 +28,7 @@ public record WakeRequestDetailResponse(
                 WakeRequestUserResponse.from(request.getSender()),
                 WakeRequestUserResponse.from(request.getReceiver()),
                 request.getRequestedAt().atZone(ZoneId.of("Asia/Seoul")).toOffsetDateTime(),
-                WakeRequestPoseResponse.from(dailyPose),
+                WakeRequestPoseResponse.from(request, dailyPose),
                 request.getAttemptCount(),
                 (short) (MAX_ATTEMPTS - request.getAttemptCount())
         );

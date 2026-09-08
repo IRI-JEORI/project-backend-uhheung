@@ -17,13 +17,18 @@ public interface WakeRequestRepository extends JpaRepository<WakeRequest, Long> 
 
     long countByReceiverIdAndStatus(Long receiverId, WakeRequestStatus status);
 
-    @EntityGraph(attributePaths = "receiver")
+    @EntityGraph(attributePaths = {"receiver", "pose"})
     List<WakeRequest> findAllByWakeGroupId(Long wakeGroupId);
 
-    @Query("select request from WakeRequest request join fetch request.sender join fetch request.receiver where request.id = :id")
+    @Query("select request from WakeRequest request join fetch request.sender join fetch request.receiver "
+            + "left join fetch request.pose where request.id = :id")
     Optional<WakeRequest> findDetailById(@Param("id") Long id);
 
-    @EntityGraph(attributePaths = {"sender", "receiver", "wakeGroup"})
+    @EntityGraph(attributePaths = "pose")
+    Optional<WakeRequest> findFirstByWakeGroupIdAndReceiverIdAndPoseIsNotNullOrderByRequestedAtDescIdDesc(
+            Long wakeGroupId, Long receiverId);
+
+    @EntityGraph(attributePaths = {"sender", "receiver", "wakeGroup", "pose"})
     @Query("""
             select request
             from WakeRequest request
@@ -39,7 +44,8 @@ public interface WakeRequestRepository extends JpaRepository<WakeRequest, Long> 
     );
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select request from WakeRequest request join fetch request.receiver where request.id = :id")
+    @Query("select request from WakeRequest request join fetch request.receiver "
+            + "left join fetch request.pose where request.id = :id")
     Optional<WakeRequest> findByIdForUpdate(@Param("id") Long id);
 
     @Query("""

@@ -51,10 +51,13 @@ public class WakeProofPersistenceService {
         WakeRequest request = wakeRequestRepository.findById(requestId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.WAKE_REQUEST_NOT_FOUND));
         validateReceiverAndAttempt(request, userId);
-        DailyPose dailyPose = dailyPoseRepository.findWithPoseByWakeGroupIdAndPoseDate(
-                        request.getWakeGroup().getId(), request.getRequestedAt().toLocalDate())
-                .orElseThrow(() -> new BusinessException(ErrorCode.ACTIVE_POSE_NOT_FOUND));
-        Pose pose = dailyPose.getPose();
+        Pose pose = request.getPose();
+        if (pose == null) {
+            DailyPose dailyPose = dailyPoseRepository.findWithPoseByWakeGroupIdAndPoseDate(
+                            request.getWakeGroup().getId(), request.getRequestedAt().toLocalDate())
+                    .orElseThrow(() -> new BusinessException(ErrorCode.ACTIVE_POSE_NOT_FOUND));
+            pose = dailyPose.getPose();
+        }
         return new ProofPreparation(pose.getImageObjectKey(), pose.getDescription());
     }
 
