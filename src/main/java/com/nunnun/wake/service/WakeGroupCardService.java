@@ -129,8 +129,12 @@ public class WakeGroupCardService {
                 .map(target -> LocalDateTime.of(now.toLocalDate(), target.getTargetWakeTime()))
                 .orElse(null);
         LocalDateTime nextTargetAt = nextWakeTargetCalculator.calculate(targets, now).orElse(null);
+        WakeProof latestGroupSuccessProof = latestSuccessProof(requests, proofsByRequest, List.of(), now);
         WakeProof latestSuccessProof = latestSuccessProof(requests, proofsByRequest, sharedProofs, now);
         LocalDateTime latestSuccessAt = latestSuccessProof == null ? null : latestSuccessProof.getVerifiedAt();
+        LocalDateTime latestGroupSuccessAt = latestGroupSuccessProof == null
+                ? null
+                : latestGroupSuccessProof.getVerifiedAt();
         LocalDateTime latestNeedsHelpAt = requests.stream()
                 .filter(request -> request.getStatus() == WakeRequestStatus.NEEDS_HELP)
                 .map(request -> {
@@ -152,9 +156,9 @@ public class WakeGroupCardService {
                         nextTargetAfterSuccessAt
                 )
         );
-        WakeEligibilityPolicy.Result eligibility = eligibilityPolicy.evaluate(dndActive, latestSuccessAt, now);
+        WakeEligibilityPolicy.Result eligibility = eligibilityPolicy.evaluate(dndActive, latestGroupSuccessAt, now);
         RemainingToTargetResponse remaining = stateCalculator.remainingToTarget(now, todayTargetAt);
-        WakeProof displayedProof = state.actualWakeAt() == null ? null : latestSuccessProof;
+        WakeProof displayedProof = latestSuccessProof;
 
         return new WakeGroupMemberResponse(
                 member.getUser().getId(),

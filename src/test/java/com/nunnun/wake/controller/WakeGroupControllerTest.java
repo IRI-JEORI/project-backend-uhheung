@@ -28,6 +28,7 @@ import com.nunnun.user.repository.UserRepository;
 import com.nunnun.wake.entity.WakeGroup;
 import com.nunnun.wake.entity.WakeGroupMember;
 import com.nunnun.wake.entity.WakeProof;
+import com.nunnun.wake.entity.WakeProofShare;
 import com.nunnun.wake.entity.WakeRequest;
 import com.nunnun.wake.entity.DailyPose;
 import com.nunnun.wake.entity.Pose;
@@ -339,6 +340,185 @@ class WakeGroupControllerTest {
     }
 
     @Test
+    void keepsAwakeDisplayButReturnsAllowedEligibilityAtCooldownBoundary() throws Exception {
+        User creator = saveUser("boundary-card-creator@example.com");
+        User member = saveUser("boundary-card-member@example.com");
+        WakeGroup group = createGroup(creator, "CARD30");
+        wakeGroupMemberRepository.saveAndFlush(WakeGroupMember.join(group, member, (short) 2));
+        weeklyWakeTargetRepository.saveAndFlush(WeeklyWakeTarget.create(
+                member, DayOfWeek.MONDAY, LocalTime.of(7, 30)));
+        WakeRequest request = wakeRequestRepository.saveAndFlush(WakeRequest.send(
+                group, creator, member, NOW.minusMinutes(31)));
+        request.verify();
+        wakeRequestRepository.saveAndFlush(request);
+        wakeProofRepository.saveAndFlush(WakeProof.verify(
+                request, "wake-proofs/card-boundary.jpg", NOW.minusMinutes(30)));
+        when(wakeProofStorage.createReadUrl(
+                org.mockito.ArgumentMatchers.eq("wake-proofs/card-boundary.jpg"),
+                org.mockito.ArgumentMatchers.any()
+        )).thenReturn("https://signed.example/card-boundary");
+
+        mockMvc.perform(get("/wake-groups/{id}", group.getId())
+                        .header("Authorization", bearerTokenFor(creator)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.members[1].state").value("AWAKE"))
+                .andExpect(jsonPath("$.data.members[1].proof_image_url")
+                        .value("https://signed.example/card-boundary"))
+                .andExpect(jsonPath("$.data.members[1].proof_expires_at")
+                        .value("2026-08-17T20:30:00+09:00"))
+                .andExpect(jsonPath("$.data.members[1].can_wake").value(true))
+                .andExpect(jsonPath("$.data.members[1].block_reason")
+                        .value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.data.members[1].wake_available_at")
+                        .value(org.hamcrest.Matchers.nullValue()));
+    }
+
+    @Test
+    void keepsValidProofDataWhenNeedsHelpTakesCardStatePriority() throws Exception {
+        User creator = saveUser("help-proof-creator@example.com");
+        User member = saveUser("help-proof-member@example.com");
+        WakeGroup group = createGroup(creator, "HELP12");
+        wakeGroupMemberRepository.saveAndFlush(WakeGroupMember.join(group, member, (short) 2));
+        saveSuccessfulProof(group, creator, member, NOW.minusHours(1), "wake-proofs/help-valid.jpg");
+        WakeRequest needsHelp = wakeRequestRepository.saveAndFlush(
+                WakeRequest.send(group, creator, member, NOW.minusMinutes(30)));
+        needsHelp.markNeedsHelp();
+        wakeRequestRepository.saveAndFlush(needsHelp);
+        when(wakeProofStorage.createReadUrl(
+                org.mockito.ArgumentMatchers.eq("wake-proofs/help-valid.jpg"),
+                org.mockito.ArgumentMatchers.any()
+        )).thenReturn("https://signed.example/help-valid");
+
+        mockMvc.perform(get("/wake-groups/{id}", group.getId())
+                        .header("Authorization", bearerTokenFor(creator)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.members[1].state").value("NEEDS_HELP"))
+                .andExpect(jsonPath("$.data.members[1].actual_wake_time")
+                        .value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.data.members[1].proof_image_url")
+                        .value("https://signed.example/help-valid"))
+                .andExpect(jsonPath("$.data.members[1].proof_expires_at")
+                        .value("2026-08-17T20:00:00+09:00"));
+    }
+
+    @Test
+    void returnsDndAndValidProofDataTogether() throws Exception {
+        User creator = saveUser("dnd-proof-creator@example.com");
+        User member = saveUser("dnd-proof-member@example.com");
+        WakeGroup group = createGroup(creator, "DND012");
+        wakeGroupMemberRepository.saveAndFlush(WakeGroupMember.join(group, member, (short) 2));
+        saveSuccessfulProof(group, creator, member, NOW.minusHours(1), "wake-proofs/dnd-valid.jpg");
+        dndWindowRepository.saveAndFlush(DndWindow.create(
+                member, DayOfWeek.MONDAY, LocalTime.of(8, 0), LocalTime.of(10, 0)));
+        when(wakeProofStorage.createReadUrl(
+                org.mockito.ArgumentMatchers.eq("wake-proofs/dnd-valid.jpg"),
+                org.mockito.ArgumentMatchers.any()
+        )).thenReturn("https://signed.example/dnd-valid");
+
+        mockMvc.perform(get("/wake-groups/{id}", group.getId())
+                        .header("Authorization", bearerTokenFor(creator)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.members[1].block_reason").value("DND"))
+                .andExpect(jsonPath("$.data.members[1].proof_image_url")
+                        .value("https://signed.example/dnd-valid"))
+                .andExpect(jsonPath("$.data.members[1].proof_expires_at")
+                        .value("2026-08-17T20:00:00+09:00"));
+    }
+
+    @Test
+    void exposesProofUntilButNotAtOrAfterItsTwelveHourExpiration() throws Exception {
+        User creator = saveUser("expiry-proof-creator@example.com");
+        User justBefore = saveUser("expiry-proof-before@example.com");
+        User atExpiry = saveUser("expiry-proof-at@example.com");
+        User afterExpiry = saveUser("expiry-proof-after@example.com");
+        WakeGroup group = createGroup(creator, "EXP012");
+        wakeGroupMemberRepository.saveAndFlush(WakeGroupMember.join(group, justBefore, (short) 2));
+        wakeGroupMemberRepository.saveAndFlush(WakeGroupMember.join(group, atExpiry, (short) 3));
+        wakeGroupMemberRepository.saveAndFlush(WakeGroupMember.join(group, afterExpiry, (short) 4));
+        saveSuccessfulProof(
+                group, creator, justBefore, NOW.minusHours(12).plusSeconds(1), "wake-proofs/before-expiry.jpg");
+        saveSuccessfulProof(
+                group, creator, atExpiry, NOW.minusHours(12), "wake-proofs/at-expiry.jpg");
+        saveSuccessfulProof(
+                group, creator, afterExpiry, NOW.minusHours(12).minusSeconds(1), "wake-proofs/after-expiry.jpg");
+        when(wakeProofStorage.createReadUrl(
+                org.mockito.ArgumentMatchers.eq("wake-proofs/before-expiry.jpg"),
+                org.mockito.ArgumentMatchers.any()
+        )).thenReturn("https://signed.example/before-expiry");
+
+        mockMvc.perform(get("/wake-groups/{id}", group.getId())
+                        .header("Authorization", bearerTokenFor(creator)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.members[1].proof_image_url")
+                        .value("https://signed.example/before-expiry"))
+                .andExpect(jsonPath("$.data.members[2].proof_image_url")
+                        .value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.data.members[3].proof_image_url")
+                        .value(org.hamcrest.Matchers.nullValue()));
+    }
+
+    @Test
+    void displaysTheNewestValidSuccessProof() throws Exception {
+        User creator = saveUser("latest-proof-creator@example.com");
+        User member = saveUser("latest-proof-member@example.com");
+        WakeGroup group = createGroup(creator, "NEW012");
+        wakeGroupMemberRepository.saveAndFlush(WakeGroupMember.join(group, member, (short) 2));
+        saveSuccessfulProof(group, creator, member, NOW.minusHours(2), "wake-proofs/older.jpg");
+        saveSuccessfulProof(group, creator, member, NOW.minusHours(1), "wake-proofs/newer.jpg");
+        when(wakeProofStorage.createReadUrl(
+                org.mockito.ArgumentMatchers.eq("wake-proofs/newer.jpg"),
+                org.mockito.ArgumentMatchers.any()
+        )).thenReturn("https://signed.example/newer");
+
+        mockMvc.perform(get("/wake-groups/{id}", group.getId())
+                        .header("Authorization", bearerTokenFor(creator)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.members[1].proof_image_url")
+                        .value("https://signed.example/newer"))
+                .andExpect(jsonPath("$.data.members[1].proof_expires_at")
+                        .value("2026-08-17T20:00:00+09:00"));
+
+        verify(wakeProofStorage).createReadUrl(
+                org.mockito.ArgumentMatchers.eq("wake-proofs/newer.jpg"),
+                org.mockito.ArgumentMatchers.any());
+    }
+
+    @Test
+    void sharedProofIsVisibleWithoutApplyingAnotherGroupsCooldown() throws Exception {
+        User creator = saveUser("shared-card-creator@example.com");
+        User otherCreator = saveUser("shared-card-other-creator@example.com");
+        User member = saveUser("shared-card-member@example.com");
+        WakeGroup sourceGroup = createGroup(creator, "SHA001");
+        WakeGroup targetGroup = createGroup(otherCreator, "SHB001");
+        wakeGroupMemberRepository.saveAndFlush(WakeGroupMember.join(sourceGroup, member, (short) 2));
+        wakeGroupMemberRepository.saveAndFlush(WakeGroupMember.join(targetGroup, member, (short) 2));
+
+        WakeRequest request = wakeRequestRepository.saveAndFlush(WakeRequest.send(
+                sourceGroup, creator, member, NOW.minusMinutes(11)));
+        request.verify();
+        wakeRequestRepository.saveAndFlush(request);
+        WakeProof proof = wakeProofRepository.saveAndFlush(WakeProof.verify(
+                request, "wake-proofs/shared-card.jpg", NOW.minusMinutes(10)));
+        wakeProofShareRepository.saveAndFlush(WakeProofShare.share(proof, targetGroup, NOW.minusMinutes(9)));
+        when(wakeProofStorage.createReadUrl(
+                org.mockito.ArgumentMatchers.eq("wake-proofs/shared-card.jpg"),
+                org.mockito.ArgumentMatchers.any()
+        )).thenReturn("https://signed.example/shared-card");
+
+        mockMvc.perform(get("/wake-groups/{id}", targetGroup.getId())
+                        .header("Authorization", bearerTokenFor(otherCreator)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.members[1].state").value("AWAKE"))
+                .andExpect(jsonPath("$.data.members[1].proof_image_url")
+                        .value("https://signed.example/shared-card"))
+                .andExpect(jsonPath("$.data.members[1].can_wake").value(true))
+                .andExpect(jsonPath("$.data.members[1].block_reason")
+                        .value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.data.members[1].wake_available_at")
+                        .value(org.hamcrest.Matchers.nullValue()));
+    }
+
+    @Test
     void dndBlocksWakeButTargetAndExistingSentRequestDoNot() throws Exception {
         User creator = saveUser("dnd-card-creator@example.com");
         User member = saveUser("dnd-card-member@example.com");
@@ -646,6 +826,20 @@ class WakeGroupControllerTest {
         WakeGroup group = wakeGroupRepository.saveAndFlush(WakeGroup.create("Wake Group", inviteCode, creator));
         wakeGroupMemberRepository.saveAndFlush(WakeGroupMember.join(group, creator, (short) 1));
         return group;
+    }
+
+    private WakeProof saveSuccessfulProof(
+            WakeGroup group,
+            User sender,
+            User receiver,
+            LocalDateTime verifiedAt,
+            String imageObjectKey
+    ) {
+        WakeRequest request = wakeRequestRepository.saveAndFlush(
+                WakeRequest.send(group, sender, receiver, verifiedAt.minusMinutes(1)));
+        request.verify();
+        wakeRequestRepository.saveAndFlush(request);
+        return wakeProofRepository.saveAndFlush(WakeProof.verify(request, imageObjectKey, verifiedAt));
     }
 
     private org.springframework.test.web.servlet.ResultActions join(User user, String inviteCode) throws Exception {

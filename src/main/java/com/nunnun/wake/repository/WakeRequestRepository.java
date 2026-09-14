@@ -61,10 +61,14 @@ public interface WakeRequestRepository extends JpaRepository<WakeRequest, Long> 
     @Query("""
             select max(proof.verifiedAt)
             from WakeProof proof join proof.wakeRequest request
-            where request.receiver.id = :receiverId
+            where request.wakeGroup.id = :wakeGroupId
+              and request.receiver.id = :receiverId
               and request.status = com.nunnun.wake.entity.WakeRequestStatus.VERIFIED
               and proof.poseMatchResult = com.nunnun.wake.entity.PoseMatchResult.SUCCESS
             """)
-    LocalDateTime findLatestVerifiedAtByReceiverId(@Param("receiverId") Long receiverId);
+    LocalDateTime findLatestVerifiedAtByWakeGroupIdAndReceiverId(
+            @Param("wakeGroupId") Long wakeGroupId,
+            @Param("receiverId") Long receiverId
+    );
 
 }
