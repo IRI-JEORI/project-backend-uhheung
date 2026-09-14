@@ -103,7 +103,7 @@ public class WakeRequestService {
         LocalDateTime now = LocalDateTime.now(clock);
         WakeEligibilityPolicy.Result eligibility = wakeEligibilityPolicy.evaluate(
                 dndActive,
-                wakeRequestRepository.findLatestVerifiedAtByReceiverId(receiverId),
+                wakeRequestRepository.findLatestVerifiedAtByWakeGroupIdAndReceiverId(groupId, receiverId),
                 now
         );
         if (eligibility.blockReason() == WakeBlockReason.DND) {

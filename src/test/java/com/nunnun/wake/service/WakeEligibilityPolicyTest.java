@@ -30,14 +30,31 @@ class WakeEligibilityPolicyTest {
     }
 
     @Test
-    void returnsCooldownEndAndAllowsAtExactThirtyMinuteBoundary() {
-        LocalDateTime verifiedAt = NOW.minusMinutes(29);
+    void blocksThroughTwentyNineMinutesFiftyNineSecondsAndAllowsFromThirtyMinutes() {
+        LocalDateTime verifiedAt = NOW.minusMinutes(29).minusSeconds(59);
         WakeEligibilityPolicy.Result blocked = policy.evaluate(false, verifiedAt, NOW);
         WakeEligibilityPolicy.Result boundary = policy.evaluate(false, NOW.minusMinutes(30), NOW);
+        WakeEligibilityPolicy.Result afterBoundary = policy.evaluate(
+                false, NOW.minusMinutes(30).minusSeconds(1), NOW);
 
         assertThat(blocked.canWake()).isFalse();
         assertThat(blocked.blockReason()).isEqualTo(WakeBlockReason.COOLDOWN);
         assertThat(blocked.wakeAvailableAt()).isEqualTo(verifiedAt.plusMinutes(30));
         assertThat(boundary.canWake()).isTrue();
+        assertThat(boundary.blockReason()).isNull();
+        assertThat(boundary.wakeAvailableAt()).isNull();
+        assertThat(afterBoundary.canWake()).isTrue();
+        assertThat(afterBoundary.blockReason()).isNull();
+        assertThat(afterBoundary.wakeAvailableAt()).isNull();
+    }
+
+    @Test
+    void keepsDndBlockedAfterCooldownHasEnded() {
+        WakeEligibilityPolicy.Result result = policy.evaluate(
+                true, NOW.minusMinutes(30).minusSeconds(1), NOW);
+
+        assertThat(result.canWake()).isFalse();
+        assertThat(result.blockReason()).isEqualTo(WakeBlockReason.DND);
+        assertThat(result.wakeAvailableAt()).isNull();
     }
 }

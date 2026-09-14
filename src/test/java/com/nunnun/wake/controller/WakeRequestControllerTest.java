@@ -284,32 +284,59 @@ class WakeRequestControllerTest {
     }
 
     @Test
-    void enforcesReceiverWideThirtyMinuteCooldownAtExactBoundary() throws Exception {
+    void appliesCooldownOnlyWithinTheVerifiedGroupImmediately() throws Exception {
         User sender = saveUser("sender@example.com");
+        User otherSender = saveUser("other-sender@example.com");
         User receiver = saveUser("receiver@example.com");
         WakeGroup group = createGroup(sender, receiver);
-        WakeRequest previous = wakeRequestRepository.saveAndFlush(WakeRequest.send(group, sender, receiver, NOW.minusMinutes(29)));
+        WakeGroup otherGroup = createGroup(otherSender, receiver);
+        WakeRequest previous = wakeRequestRepository.saveAndFlush(WakeRequest.send(group, sender, receiver, NOW));
         previous.verify();
         wakeRequestRepository.saveAndFlush(previous);
-        wakeProofRepository.saveAndFlush(WakeProof.verify(previous, "wake-proofs/old.jpg", NOW.minusMinutes(29)));
+        wakeProofRepository.saveAndFlush(WakeProof.verify(previous, "wake-proofs/old.jpg", NOW));
 
         wake(sender, group.getId(), receiver.getId()).andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error.code").value("WAKE_COOLDOWN"));
         assertThat(dailyPoseRepository.count()).isZero();
         assertThat(notificationRepository.count()).isZero();
 
-        clearData();
-        activePose = poseRepository.saveAndFlush(
-                Pose.create("TEST_POSE_2", "test/pose-2.png", "두 팔을 벌려주세요")
-        );
-        sender = saveUser("sender2@example.com");
-        receiver = saveUser("receiver2@example.com");
-        group = createGroup(sender, receiver);
-        previous = wakeRequestRepository.saveAndFlush(WakeRequest.send(group, sender, receiver, NOW.minusMinutes(30)));
+        wake(otherSender, otherGroup.getId(), receiver.getId())
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.status").value("SENT"));
+        assertThat(wakeRequestRepository.findAllByWakeGroupId(otherGroup.getId())).hasSize(1);
+    }
+
+    @Test
+    void blocksWakeInTheSameGroupAtTwentyNineMinutes() throws Exception {
+        User sender = saveUser("cooldown-29-sender@example.com");
+        User receiver = saveUser("cooldown-29-receiver@example.com");
+        WakeGroup group = createGroup(sender, receiver);
+        WakeRequest previous = wakeRequestRepository.saveAndFlush(
+                WakeRequest.send(group, sender, receiver, NOW.minusMinutes(29)));
         previous.verify();
         wakeRequestRepository.saveAndFlush(previous);
-        wakeProofRepository.saveAndFlush(WakeProof.verify(previous, "wake-proofs/boundary.jpg", NOW.minusMinutes(30)));
-        wake(sender, group.getId(), receiver.getId()).andExpect(status().isCreated());
+        wakeProofRepository.saveAndFlush(WakeProof.verify(
+                previous, "wake-proofs/29-minutes.jpg", NOW.minusMinutes(29)));
+
+        wake(sender, group.getId(), receiver.getId())
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error.code").value("WAKE_COOLDOWN"));
+    }
+
+    @Test
+    void allowsWakeInTheSameGroupAtExactThirtyMinuteBoundary() throws Exception {
+        User sender = saveUser("cooldown-30-sender@example.com");
+        User receiver = saveUser("cooldown-30-receiver@example.com");
+        WakeGroup group = createGroup(sender, receiver);
+        WakeRequest previous = wakeRequestRepository.saveAndFlush(
+                WakeRequest.send(group, sender, receiver, NOW.minusMinutes(30)));
+        previous.verify();
+        wakeRequestRepository.saveAndFlush(previous);
+        wakeProofRepository.saveAndFlush(WakeProof.verify(
+                previous, "wake-proofs/30-minutes.jpg", NOW.minusMinutes(30)));
+
+        wake(sender, group.getId(), receiver.getId())
+                .andExpect(status().isCreated());
     }
 
     @Test
